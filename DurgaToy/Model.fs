@@ -38,10 +38,10 @@ let exampleTxt = """
 Inputs: Case Entity (case, ExecutionContext ctx)
 
 Case Create:
-                when ctx.field1 == "abc"
+                when ctx.field1 = "abc"
                                 Create Task with name = "sdfsdf"
                                 Associate with case
-                When ctx.field2 = 1 and field 4 = "b"
+                when ctx.field2 = 1 and field4 = "b"
                                 Send email"""
 
 // Manually construct a data structure in F# as an example of what the parser will give us
@@ -55,7 +55,7 @@ let example =
                         CreateTask("sdfsdf")
                         Associate
                     ]
-                And(Equal(MemberReference(ContextReference, "field2"), Literal(Int 1)), Equal(MemberReference(ContextReference, "field4"), Literal(String "b"))),
+                And(Equal(MemberReference(ContextReference, "field2"), Literal(Int 1)), Equal(VariableReference "field4", Literal(String "b"))),
                     [
                         SendEmail
                     ]
@@ -91,14 +91,15 @@ module Parse =
         | _ -> None
     let rec (|ExpressionP|_|) = pack <| function
         | ExpressionP(lhs, Word("and", ExpressionP(rhs,rest))) -> Some(Expression.And(lhs, rhs), rest) // notice the recursion! This is why we need packrat.
-        | ExpressionP(lhs, OWS(Str "==" (OWS(ExpressionP(rhs,rest))))) -> Some(Expression.And(lhs, rhs), rest) // notice the recursion! This is why we need packrat.
+        | ExpressionP(lhs, OWS(Str "=" (OWS(LiteralP(rhs,rest))))) -> Some(Expression.Equal(lhs, Literal rhs), rest) // notice how we ONLY accept expression literals after =, so that foo = 2 and bar = 4 will associate properly. Designing a grammar is often the hardest part of parsing.
         | LiteralP(l, rest) -> Some(Expression.Literal l, rest)
         | DurgaToyContextP { executionContextName = Some ctxName } & NameP(owner, Str "." (NameP(memberName, rest))) when ctxName = owner -> Some(MemberReference(ContextReference, memberName), rest)
         | ExpressionP(owner, Str "." (NameP(memberName, rest))) -> Some(MemberReference(owner, memberName), rest) // notice the recursion! This is why we need packrat, so we can say stuff like foo.bar.baz, which is a member reference inside another member reference
         | NameP(name, rest) -> Some(VariableReference name, rest)
         | _ -> None
-    let rec (|CaseBranchesP|_|) = function
-        | OWS(Str "when" (ExpressionP(expr, StatementsP(statements, rest)))) -> Some([expr, statements], rest)
+    let rec (|CaseBranchesP|_|) = pack <| function
+        | CaseBranchesP(prev, OWS(Str "when" (WS(ExpressionP(expr, StatementsP(statements, rest)))))) -> Some(prev@[expr, statements], rest) // notice the recursion!
+        | OWS(Str "when" (WS(ExpressionP(expr, StatementsP(statements, rest))))) -> Some([expr, statements], rest)
         | _ -> None
     and (|StatementP|_|) = function
         | OWS(Str "Case" (Word(caseName, Str ":" (CaseBranchesP(branches, rest))))) ->
@@ -128,24 +129,10 @@ module Parse =
         | PrefaceP(p, (args, ix as rest)) ->
             failwithf "Invalid program: too much input.\nParsed:%A\nLeftover input: %s" p (args.input.Substring(ix))
         | _ -> failwithf "Invalid program: \n%s" input
-    let txt = """
-                when ctx.field1 == "abc"
-                                Create Task with name = "sdfsdf"
-                                Associate with case"""
-    match ParseArgs.Init("ctx.field1 == \"abc\"", { executionContextName = None }) with
-    | ExpressionP(p, OWS(End)) -> p
-    | ExpressionP(p, (args, ix as rest)) ->
-        printfn "%A\nLeftover input: %s" p (args.input.Substring(ix))
-        failwith "Invalid program"
-    match ParseArgs.Init(txt, { executionContextName = None }) with
-    | CaseBranchesP(p, OWS(End)) -> p
-    | CaseBranchesP(p, (args, ix as rest)) ->
-        printfn "%A\nLeftover input: %s" p (args.input.Substring(ix))
-        failwith "Invalid program"
-    | _ -> failwithf "Invalid program: \n%s" txt
 
-Parse.parse exampleTxt = example
-
+#if INTERACTIVE
+Parse.parse exampleTxt = example // notice how they match!
+#endif
 
 module Execution =
     let execute input =
