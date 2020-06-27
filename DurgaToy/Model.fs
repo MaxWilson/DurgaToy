@@ -1,7 +1,5 @@
 ﻿module Model
 
-type InputDeclaration = InputDeclaration of caseName: string * contextName: string
-type Preface = Preface of InputDeclaration
 type Literal = Int of int | String of string
 type Expression =
     | VariableReference of name: string
@@ -15,6 +13,8 @@ type Statement =
     | CreateTask of name: string
     | Associate
     | SendEmail
+type InputDeclaration = InputDeclaration of caseName: string * contextName: string
+type Preface = Preface of InputDeclaration
 type Program = Program of Preface * Statement list
 
 (*
@@ -53,7 +53,34 @@ let example =
         ])
 
 module Parse =
-    let parse input = example
+    open Packrat
+    // For the sake of convention, I'm going to put a capital P for "Parser" at the end of all my parsing patterns but you could use another convention.
+    type DurgaToyContext = {
+        mutable executionContextName: string option
+    }
+
+    let (|DurgaToyContextP|_|) =
+        Packrat.ExternalContextOf<DurgaToyContext>
+
+    let (|LiteralP|_|) = function
+        | Int(n, rest) -> Some (Literal (Int n), rest)
+        | Str "\"" (CharsExcept (Set.ofList ['"'])(txt, Str "\"" rest)) ->
+            Some (Literal (String txt), rest)
+        | _ -> None
+    let (|NameP|_|) = function
+        | Chars alphanumeric (name, rest) -> Some(name, rest)
+        | _ -> None
+    let (|Expression|_|) = function
+        | DurgaToyContextP { executionContextName = Some ctxName } & NameP(name, rest) when ctxName = name -> Some(ContextReference, rest)
+        | NameP(name, rest) -> Some(VariableReference name, rest)
+        | _ -> None
+    let (|ProgramP|_|) = function
+        | _ -> Some example
+
+    let parse input =
+        match ParseArgs.Init(input, { executionContextName = None }) with
+        | ProgramP p -> p
+        | _ -> failwithf "Invalid program: \n%s" input
 
 module Execution =
     let execute input =
