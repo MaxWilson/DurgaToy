@@ -51,3 +51,10 @@ let example =
                     ]
             ])
         ])
+
+module Parse =
+    let parse input = example
+
+module Execution =
+    let execute input =
+        printfn "Execution not implemented yet: \n%A" input

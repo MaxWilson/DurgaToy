@@ -3,5 +3,11 @@
 
 [<EntryPoint>]
 let main argv =
-    printfn "%A" argv
+    match argv with
+    | [|programTxt|] ->
+        programTxt
+        |> Model.Parse.parse
+        |> Model.Execution.execute
+    | _ ->
+        printfn """Usage: DurgaToy.exe "<program>" """
     0 // return an integer exit code
