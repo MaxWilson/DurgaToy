@@ -37,9 +37,6 @@ Case Create:
 let exampleTxt = """
 Inputs: Case Entity (case, ExecutionContext ctx)
 
-ctx.user = "system"
-                dsffsdfdsaf
-ctx.user <> system
 Case Create:
                 when ctx.field1 == "abc"
                                 Create Task with name = "sdfsdf"
@@ -94,6 +91,7 @@ module Parse =
         | _ -> None
     let rec (|ExpressionP|_|) = pack <| function
         | ExpressionP(lhs, Word("and", ExpressionP(rhs,rest))) -> Some(Expression.And(lhs, rhs), rest) // notice the recursion! This is why we need packrat.
+        | ExpressionP(lhs, OWS(Str "==" (OWS(ExpressionP(rhs,rest))))) -> Some(Expression.And(lhs, rhs), rest) // notice the recursion! This is why we need packrat.
         | LiteralP(l, rest) -> Some(Expression.Literal l, rest)
         | DurgaToyContextP { executionContextName = Some ctxName } & NameP(owner, Str "." (NameP(memberName, rest))) when ctxName = owner -> Some(MemberReference(ContextReference, memberName), rest)
         | ExpressionP(owner, Str "." (NameP(memberName, rest))) -> Some(MemberReference(owner, memberName), rest) // notice the recursion! This is why we need packrat, so we can say stuff like foo.bar.baz, which is a member reference inside another member reference
@@ -117,7 +115,7 @@ module Parse =
         | StatementP(statement, rest) -> Some([statement], rest)
         | _ -> None
     let (|PrefaceP|_|) = function
-        | Str "Inputs: Case Entity" (OWS(Str "(" (NameP(caseName, OWS(Str "," (OWS(Str "ExecutionContext" (OWS(NameP(contextName, Str ")" rest)))))))))) & DurgaToyContextP ctx ->
+        | OWS(Str "Inputs: Case Entity" (OWS(Str "(" (NameP(caseName, OWS(Str "," (OWS(Str "ExecutionContext" (OWS(NameP(contextName, Str ")" (OWS rest)))))))))))) & DurgaToyContextP ctx ->
             ctx.executionContextName <- Some contextName // remember the context name so we can use it later on in parsing.
             Some(Preface(InputDeclaration(caseName, contextName)), rest)
         | _ -> None
@@ -127,9 +125,27 @@ module Parse =
     let parse input =
         match ParseArgs.Init(input, { executionContextName = None }) with
         | ProgramP(p, End) -> p
+        | PrefaceP(p, (args, ix as rest)) ->
+            failwithf "Invalid program: too much input.\nParsed:%A\nLeftover input: %s" p (args.input.Substring(ix))
         | _ -> failwithf "Invalid program: \n%s" input
+    let txt = """
+                when ctx.field1 == "abc"
+                                Create Task with name = "sdfsdf"
+                                Associate with case"""
+    match ParseArgs.Init("ctx.field1 == \"abc\"", { executionContextName = None }) with
+    | ExpressionP(p, OWS(End)) -> p
+    | ExpressionP(p, (args, ix as rest)) ->
+        printfn "%A\nLeftover input: %s" p (args.input.Substring(ix))
+        failwith "Invalid program"
+    match ParseArgs.Init(txt, { executionContextName = None }) with
+    | CaseBranchesP(p, OWS(End)) -> p
+    | CaseBranchesP(p, (args, ix as rest)) ->
+        printfn "%A\nLeftover input: %s" p (args.input.Substring(ix))
+        failwith "Invalid program"
+    | _ -> failwithf "Invalid program: \n%s" txt
 
 Parse.parse exampleTxt = example
+
 
 module Execution =
     let execute input =
